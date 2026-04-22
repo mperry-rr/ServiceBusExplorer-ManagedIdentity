@@ -5,6 +5,8 @@
     using CommandLine;
     using CommandLine.Text;
     using Helpers;
+    using ServiceBusExplorer.Auth;
+    using Microsoft.ServiceBus.Messaging;
 
     public class CommandLineOptions
     {
@@ -13,6 +15,24 @@
 
         [Option('c', "connectionString", SetName = "Connection", Required = false, HelpText = "Use a connection string.")]
         public string ConnectionString { get; set; }
+
+        [Option("fqdn", SetName = "EntraId", Required = false, HelpText = "Fully qualified Service Bus namespace (e.g. mybus.servicebus.windows.net). Used together with --auth.")]
+        public string FullyQualifiedNamespace { get; set; }
+
+        [Option("auth", SetName = "EntraId", Required = false, HelpText = "Authentication mode for Entra ID: ManagedIdentity, ManagedIdentityUserAssigned, DefaultAzureCredential, ServicePrincipal, ServicePrincipalCertificate, InteractiveBrowser.")]
+        public string Authentication { get; set; }
+
+        [Option("client-id", Required = false, HelpText = "Client ID (UAMI client id, service principal app id, or interactive client id).")]
+        public string ClientId { get; set; }
+
+        [Option("tenant-id", Required = false, HelpText = "Tenant ID for service principal / multi-tenant scenarios.")]
+        public string TenantId { get; set; }
+
+        [Option("client-secret", Required = false, HelpText = "Service principal client secret. Prefer --auth ManagedIdentity or DefaultAzureCredential when possible.")]
+        public string ClientSecret { get; set; }
+
+        [Option("certificate-thumbprint", Required = false, HelpText = "Thumbprint of an X509 certificate (CurrentUser/My or LocalMachine/My) for service principal authentication.")]
+        public string CertificateThumbprint { get; set; }
 
         [Option('q', "queueFilter", Required = false, HelpText = "Set queue odata filter expression.")]
         public string QueueFilter { get; set; }
@@ -78,6 +98,21 @@
                     {
                         localArgument = "/c";
                         localValue = o.ConnectionString.Trim();
+                    }
+                    else if (!string.IsNullOrWhiteSpace(o.FullyQualifiedNamespace) && !string.IsNullOrWhiteSpace(o.Authentication))
+                    {
+                        var mode = ServiceBusNamespace.ParseAuthenticationMode(o.Authentication);
+                        var options = new EntraIdAuthenticationOptions
+                        {
+                            Mode = mode,
+                            ClientId = string.IsNullOrWhiteSpace(o.ClientId) ? null : o.ClientId.Trim(),
+                            TenantId = string.IsNullOrWhiteSpace(o.TenantId) ? null : o.TenantId.Trim(),
+                            ClientSecret = string.IsNullOrWhiteSpace(o.ClientSecret) ? null : o.ClientSecret,
+                            CertificateThumbprint = string.IsNullOrWhiteSpace(o.CertificateThumbprint) ? null : o.CertificateThumbprint.Trim(),
+                        };
+                        localArgument = "/c";
+                        localValue = ServiceBusNamespace.BuildEntraIdConnectionString(
+                            o.FullyQualifiedNamespace.Trim(), options, TransportType.Amqp);
                     }
 
                     if (!string.IsNullOrWhiteSpace(o.QueueFilter))

@@ -226,6 +226,7 @@ namespace ServiceBusExplorer
             {
                 string uri;
                 return connectionStringType == ServiceBusNamespaceType.Cloud ||
+                       connectionStringType == ServiceBusNamespaceType.EntraId ||
                       (namespaceUri != null &&
                        !string.IsNullOrWhiteSpace(uri = namespaceUri.ToString()) &&
                        (uri.Contains(CloudServiceBusPostfix) ||
@@ -597,7 +598,24 @@ namespace ServiceBusExplorer
         public MessagingFactory CreateMessagingFactory()
         {
             MessagingFactory factory;
-            if (!string.IsNullOrEmpty(ConnectionString))
+
+            if (serviceBusNamespaceInstance != null &&
+                serviceBusNamespaceInstance.ConnectionStringType == ServiceBusNamespaceType.EntraId)
+            {
+                var tokenProvider = ServiceBusExplorer.Auth.LegacyAadTokenProviderFactory.Create(
+                    serviceBusNamespaceInstance.EntraIdAuthentication);
+
+                var settings = new MessagingFactorySettings
+                {
+                    OperationTimeout = TimeSpan.FromMinutes(5),
+                    TokenProvider = tokenProvider,
+                    TransportType = Microsoft.ServiceBus.Messaging.TransportType.Amqp,
+                };
+
+                var aadUri = new Uri($"sb://{serviceBusNamespaceInstance.FullyQualifiedNamespace}/");
+                factory = MessagingFactory.Create(aadUri, settings);
+            }
+            else if (!string.IsNullOrEmpty(ConnectionString))
             {
                 factory = MessagingFactory.CreateFromConnectionString(ConnectionStringWithoutEntityPath);
             }
@@ -632,7 +650,14 @@ namespace ServiceBusExplorer
         {
             this.serviceBusNamespaceInstance = serviceBusNamespace;
 
-            if (string.IsNullOrWhiteSpace(serviceBusNamespace?.ConnectionString))
+            if (serviceBusNamespace == null)
+            {
+                throw new ArgumentException(ServiceBusConnectionStringCannotBeNull);
+            }
+
+            var isEntraId = serviceBusNamespace.ConnectionStringType == ServiceBusNamespaceType.EntraId;
+
+            if (!isEntraId && string.IsNullOrWhiteSpace(serviceBusNamespace.ConnectionString))
             {
                 throw new ArgumentException(ServiceBusConnectionStringCannotBeNull);
             }
@@ -648,11 +673,22 @@ namespace ServiceBusExplorer
                 currentSharedAccessKey = serviceBusNamespace.SharedAccessKey;
                 currentSharedAccessKeyName = serviceBusNamespace.SharedAccessKeyName;
 
-                // The NamespaceManager class can be used for managing entities,
-                // such as queues, topics, subscriptions, and rules, in your service namespace.
-                // You must provide service namespace address and access credentials in order
-                // to manage your service namespace.
-                namespaceManager = Microsoft.ServiceBus.NamespaceManager.CreateFromConnectionString(ConnectionStringWithoutEntityPath);
+                if (isEntraId)
+                {
+                    var tokenProvider = ServiceBusExplorer.Auth.LegacyAadTokenProviderFactory.Create(
+                        serviceBusNamespace.EntraIdAuthentication);
+
+                    var aadUri = new Uri($"sb://{serviceBusNamespace.FullyQualifiedNamespace}/");
+                    namespaceManager = new Microsoft.ServiceBus.NamespaceManager(aadUri, tokenProvider);
+                }
+                else
+                {
+                    // The NamespaceManager class can be used for managing entities,
+                    // such as queues, topics, subscriptions, and rules, in your service namespace.
+                    // You must provide service namespace address and access credentials in order
+                    // to manage your service namespace.
+                    namespaceManager = Microsoft.ServiceBus.NamespaceManager.CreateFromConnectionString(ConnectionStringWithoutEntityPath);
+                }
 
                 // Set retry count
                 if (namespaceManager.Settings.RetryPolicy is Microsoft.ServiceBus.RetryExponential defaultServiceBusRetryExponential)
@@ -664,16 +700,26 @@ namespace ServiceBusExplorer
 
                 try
                 {
-                    notificationHubNamespaceManager = AzureNotificationHubs.NamespaceManager.CreateFromConnectionString(serviceBusNamespace.ConnectionStringWithoutTransportType);
-
-                    // Set retry count
-                    if (notificationHubNamespaceManager.Settings.RetryPolicy is AzureNotificationHubs.RetryExponential defaultNotificationHubsRetryExponential)
+                    if (isEntraId)
                     {
-                        notificationHubNamespaceManager.Settings.RetryPolicy = new AzureNotificationHubs.RetryExponential(defaultNotificationHubsRetryExponential.MinimalBackoff,
-                                                                                                                        defaultNotificationHubsRetryExponential.MaximumBackoff,
-                                                                                                                        defaultNotificationHubsRetryExponential.DeltaBackoff,
-                                                                                                                        defaultNotificationHubsRetryExponential.TerminationTimeBuffer,
-                                                                                                                        RetryHelper.RetryCount);
+                        // The Microsoft.Azure.NotificationHubs 1.0.9 package shipped with this project
+                        // does not support AAD authentication; skip notification-hub initialization in
+                        // Entra ID mode rather than failing the entire connect.
+                        notificationHubNamespaceManager = null;
+                    }
+                    else
+                    {
+                        notificationHubNamespaceManager = AzureNotificationHubs.NamespaceManager.CreateFromConnectionString(serviceBusNamespace.ConnectionStringWithoutTransportType);
+
+                        // Set retry count
+                        if (notificationHubNamespaceManager.Settings.RetryPolicy is AzureNotificationHubs.RetryExponential defaultNotificationHubsRetryExponential)
+                        {
+                            notificationHubNamespaceManager.Settings.RetryPolicy = new AzureNotificationHubs.RetryExponential(defaultNotificationHubsRetryExponential.MinimalBackoff,
+                                                                                                                            defaultNotificationHubsRetryExponential.MaximumBackoff,
+                                                                                                                            defaultNotificationHubsRetryExponential.DeltaBackoff,
+                                                                                                                            defaultNotificationHubsRetryExponential.TerminationTimeBuffer,
+                                                                                                                            RetryHelper.RetryCount);
+                        }
                     }
                 }
                 catch (Exception)
@@ -698,7 +744,7 @@ namespace ServiceBusExplorer
 
                 // As the name suggests, the MessagingFactory class is a Factory class that allows to create
                 // instances of the QueueClient, TopicClient and SubscriptionClient classes.
-                MessagingFactory = MessagingFactory.CreateFromConnectionString(ConnectionStringWithoutEntityPath);
+                MessagingFactory = CreateMessagingFactory();
                 WriteToLogIf(traceEnabled, MessageFactorySuccessfullyCreated);
                 return true;
             });
@@ -3968,6 +4014,17 @@ namespace ServiceBusExplorer
             serviceBusHelper2.TransportType = UseAmqpWebSockets
                 ? Azure.Messaging.ServiceBus.ServiceBusTransportType.AmqpWebSockets
                 : Azure.Messaging.ServiceBus.ServiceBusTransportType.AmqpTcp;
+
+            if (serviceBusNamespaceInstance != null &&
+                serviceBusNamespaceInstance.ConnectionStringType == ServiceBusNamespaceType.EntraId &&
+                serviceBusNamespaceInstance.EntraIdAuthentication != null &&
+                serviceBusNamespaceInstance.EntraIdAuthentication.IsEntraId)
+            {
+                serviceBusHelper2.FullyQualifiedNamespace = serviceBusNamespaceInstance.FullyQualifiedNamespace;
+                serviceBusHelper2.TokenCredential = ServiceBusExplorer.Auth.TokenCredentialFactory.Create(
+                    serviceBusNamespaceInstance.EntraIdAuthentication);
+            }
+
             return serviceBusHelper2;
         }
 
@@ -3978,7 +4035,7 @@ namespace ServiceBusExplorer
 
         public async Task<List<QueueProperties>> GetQueueProperties(List<QueueDescription> oldQueueDescriptions)
         {
-            var administrationClient = new ServiceBusAdministrationClient(connectionString);
+            var administrationClient = GetServiceBusHelper2().CreateAdministrationClient();
             var result = new List<QueueProperties>();
 
             foreach (QueueDescription oldQueueDescription in oldQueueDescriptions)
@@ -3996,7 +4053,7 @@ namespace ServiceBusExplorer
 
         public async Task<List<SubscriptionProperties>> GetSubscriptionProperties(List<SubscriptionWrapper> oldSubscriptionWrappers)
         {
-            var managementClient = new ServiceBusAdministrationClient(connectionString);
+            var managementClient = GetServiceBusHelper2().CreateAdministrationClient();
             var result = new List<SubscriptionProperties>();
 
             foreach (SubscriptionWrapper oldSubscriptionWrapper in oldSubscriptionWrappers)

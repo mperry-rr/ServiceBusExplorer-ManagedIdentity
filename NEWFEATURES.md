@@ -1,3 +1,12 @@
+- **Microsoft Entra ID / Managed Identity authentication** for Azure Service Bus namespaces:
+  - Managed Identity (system-assigned and user-assigned)
+  - DefaultAzureCredential (Azure CLI, Visual Studio, env vars, ...)
+  - Service Principal with client secret or X.509 certificate
+  - Interactive browser sign-in
+  - New "Entra ID..." button in the Connect dialog to describe an AAD-protected namespace
+  - CLI flags: `--fqdn`, `--auth`, `--client-id`, `--tenant-id`, `--client-secret`, `--certificate-thumbprint`
+  - Pseudo connection-string format: `Endpoint=sb://<fqdn>/;Authentication=Managed Identity;ClientId=...;TenantId=...;TransportType=Amqp`
+  - Existing SAS-based connections continue to work unchanged
 - TreeView search/filter box: real-time filtering of queues, topics and subscriptions (Ctrl+F to focus)
 - Dashboard tab: message counts (Active, Dead Letter, Scheduled, Total) for all queues and subscriptions at a glance
 - Dashboard auto-refresh: configurable interval (30s / 1min / 5min) with manual refresh button

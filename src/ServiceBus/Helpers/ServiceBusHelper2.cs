@@ -21,6 +21,7 @@
 
 using System.Threading.Tasks;
 
+using Azure.Core;
 using Azure.Messaging.ServiceBus;
 using Azure.Messaging.ServiceBus.Administration;
 
@@ -37,6 +38,21 @@ namespace ServiceBusExplorer.ServiceBus.Helpers
         public string ConnectionString { get; set; }
         public ServiceBusTransportType TransportType { get; set; }
 
+        /// <summary>
+        /// When set, modern Azure.Messaging.ServiceBus clients are created with this credential
+        /// (against <see cref="FullyQualifiedNamespace"/>) instead of from <see cref="ConnectionString"/>.
+        /// Used for Entra ID-protected namespaces.
+        /// </summary>
+        public TokenCredential TokenCredential { get; set; }
+
+        /// <summary>
+        /// Fully-qualified namespace (e.g. "mybus.servicebus.windows.net") used when
+        /// <see cref="TokenCredential"/> is set.
+        /// </summary>
+        public string FullyQualifiedNamespace { get; set; }
+
+        public bool UsesEntraId => TokenCredential != null && !string.IsNullOrWhiteSpace(FullyQualifiedNamespace);
+
         public WriteToLogDelegate WriteToLog
         {
             get
@@ -52,14 +68,20 @@ namespace ServiceBusExplorer.ServiceBus.Helpers
 
         public bool ConnectionStringContainsEntityPath()
         {
-            var connectionStringProperties = ServiceBusConnectionStringProperties.Parse(ConnectionString);
-
-            if (connectionStringProperties?.EntityPath != null)
+            if (UsesEntraId || string.IsNullOrWhiteSpace(ConnectionString))
             {
-                return true;
+                return false;
             }
 
-            return false;
+            try
+            {
+                var connectionStringProperties = ServiceBusConnectionStringProperties.Parse(ConnectionString);
+                return connectionStringProperties?.EntityPath != null;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>
@@ -68,14 +90,29 @@ namespace ServiceBusExplorer.ServiceBus.Helpers
         /// <returns>An Azure.Messaging.ServiceBus.ServiceBusClient</returns>
         public ServiceBusClient CreateServiceBusClient()
         {
-            return new ServiceBusClient(
-                ConnectionString,
-                new ServiceBusClientOptions { TransportType = this.TransportType });
+            var clientOptions = new ServiceBusClientOptions { TransportType = this.TransportType };
+
+            if (UsesEntraId)
+            {
+                return new ServiceBusClient(FullyQualifiedNamespace, TokenCredential, clientOptions);
+            }
+
+            return new ServiceBusClient(ConnectionString, clientOptions);
+        }
+
+        public ServiceBusAdministrationClient CreateAdministrationClient()
+        {
+            if (UsesEntraId)
+            {
+                return new ServiceBusAdministrationClient(FullyQualifiedNamespace, TokenCredential);
+            }
+
+            return new ServiceBusAdministrationClient(ConnectionString);
         }
 
         public async Task<bool> IsPremiumNamespace()
         {
-            var administrationClient = new ServiceBusAdministrationClient(ConnectionString);
+            var administrationClient = CreateAdministrationClient();
             NamespaceProperties namespaceProperties = await administrationClient.GetNamespacePropertiesAsync().ConfigureAwait(false);
 
             return namespaceProperties.MessagingSku == MessagingSku.Premium;
@@ -83,13 +120,13 @@ namespace ServiceBusExplorer.ServiceBus.Helpers
 
         public async Task<bool> IsQueue(string name)
         {
-            var administrationClient = new ServiceBusAdministrationClient(ConnectionString);
+            var administrationClient = CreateAdministrationClient();
             return await administrationClient.QueueExistsAsync(name).ConfigureAwait(false);
         }
 
         public async Task<bool> IsTopic(string name)
         {
-            var administrationClient = new ServiceBusAdministrationClient(ConnectionString);
+            var administrationClient = CreateAdministrationClient();
             return await administrationClient.TopicExistsAsync(name).ConfigureAwait(false);
         }
     }

@@ -273,6 +273,7 @@ namespace ServiceBusExplorer.Forms
         public MainForm(string logMessage)
         {
             InitializeComponent();
+            AddEntraIdServiceBusMenuItem();
             logTask = Task.Factory.StartNew(AsyncWriteToLog).ContinueWith(t =>
             {
                 if (t.IsFaulted && t.Exception != null)
@@ -509,10 +510,45 @@ namespace ServiceBusExplorer.Forms
 
         async void connectUsingSASToolStripMenuItem_Click(object sender, EventArgs e)
         {
+            await OpenServiceBusConnectForm(autoOpenEntraId: false);
+        }
+
+        async void connectUsingEntraIdServiceBusMenuItem_Click(object sender, EventArgs e)
+        {
+            await OpenServiceBusConnectForm(autoOpenEntraId: true);
+        }
+
+        void AddEntraIdServiceBusMenuItem()
+        {
+            // Programmatically adds a "Connect using Entra ID (Service &Bus)..." entry to the
+            // File menu, next to the existing SAS entry. Opens the same ConnectForm but
+            // immediately pops the Entra ID dialog so users don't have to hunt for the button.
+            var item = new System.Windows.Forms.ToolStripMenuItem
+            {
+                Name = "connectUsingEntraIdServiceBusMenuItem",
+                Text = "Connect using Entra ID (Service &Bus)",
+            };
+            item.Click += connectUsingEntraIdServiceBusMenuItem_Click;
+
+            var dropDown = fileToolStripMenuItem.DropDownItems;
+            var insertAt = dropDown.IndexOf(connectUsingSASToolStripMenuItem) + 1;
+            if (insertAt <= 0)
+            {
+                dropDown.Add(item);
+            }
+            else
+            {
+                dropDown.Insert(insertAt, item);
+            }
+        }
+
+        async System.Threading.Tasks.Task OpenServiceBusConnectForm(bool autoOpenEntraId)
+        {
             try
             {
                 using (var connectForm = new ConnectForm(serviceBusHelper, configFileUse))
                 {
+                    connectForm.AutoOpenEntraIdDialog = autoOpenEntraId;
                     if (connectForm.ShowDialog() != DialogResult.OK)
                     {
                         UpdateSavedConnectionsMenu();

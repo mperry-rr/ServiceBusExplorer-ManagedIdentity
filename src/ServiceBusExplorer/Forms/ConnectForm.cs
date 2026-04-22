@@ -154,6 +154,39 @@ namespace ServiceBusExplorer.Forms
             }
         }
 
+        public bool AutoOpenEntraIdDialog { get; set; }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            if (AutoOpenEntraIdDialog)
+            {
+                AutoOpenEntraIdDialog = false;
+                BtnEntraId_Click(this, EventArgs.Empty);
+            }
+        }
+
+        private void BtnEntraId_Click(object sender, EventArgs e)
+        {
+            using (var form = new EntraIdConnectForm())
+            {
+                if (form.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                // Switch the dropdown to "Enter connection string..." then inject the AAD pseudo
+                // connection string so the rest of the existing OK / Save flow can consume it.
+                // Modern Service Bus AAD auth only supports AMQP, so lock the transport combo.
+                cboServiceBusNamespace.SelectedIndex = 1;
+                txtUri.Text = form.ConnectionString;
+                cboTransportType.SelectedItem = TransportType.Amqp;
+                cboTransportType.Enabled = false;
+                toolTip.SetToolTip(cboTransportType, "Entra ID / managed identity only supports the AMQP transport.");
+                btnOk.Enabled = !string.IsNullOrWhiteSpace(txtUri.Text);
+            }
+        }
+
         void SetConfigFileUseLabelText(Label label)
         {
             var originalConfigFileUseInfo = label.Text;
@@ -595,6 +628,7 @@ namespace ServiceBusExplorer.Forms
                 var isNewServiceBusNamespace = (key == EnterConnectionString);
 
                 ServiceBusConnectionStringBuilder serviceBusConnectionStringBuilder;
+                bool isAadConnectionString = false;
 
                 try
                 {
@@ -606,7 +640,17 @@ namespace ServiceBusExplorer.Forms
                         return;
                     }
 
-                    serviceBusConnectionStringBuilder = new ServiceBusConnectionStringBuilder(ConnectionString);
+                    isAadConnectionString = ConnectionString.IndexOf("Authentication=", StringComparison.OrdinalIgnoreCase) >= 0;
+                    if (isAadConnectionString)
+                    {
+                        // Legacy ServiceBusConnectionStringBuilder doesn't understand Authentication=...;
+                        // fall back to our parser for validation/host extraction.
+                        serviceBusConnectionStringBuilder = null;
+                    }
+                    else
+                    {
+                        serviceBusConnectionStringBuilder = new ServiceBusConnectionStringBuilder(ConnectionString);
+                    }
                 }
                 catch (Exception)
                 {
@@ -614,14 +658,28 @@ namespace ServiceBusExplorer.Forms
                     return;
                 }
 
-                if (serviceBusConnectionStringBuilder.Endpoints == null ||
-                    serviceBusConnectionStringBuilder.Endpoints.Count == 0)
+                string host;
+                if (isAadConnectionString)
                 {
-                    MainForm.StaticWriteToLog("The connection string does not contain any endpoint.");
-                    return;
+                    var parsedNs = ServiceBusNamespace.GetServiceBusNamespace("__validate__", ConnectionString, (m, a) => { });
+                    if (parsedNs == null || string.IsNullOrWhiteSpace(parsedNs.FullyQualifiedNamespace))
+                    {
+                        MainForm.StaticWriteToLog("The Entra ID connection string is invalid.");
+                        return;
+                    }
+                    host = parsedNs.FullyQualifiedNamespace;
                 }
+                else
+                {
+                    if (serviceBusConnectionStringBuilder.Endpoints == null ||
+                        serviceBusConnectionStringBuilder.Endpoints.Count == 0)
+                    {
+                        MainForm.StaticWriteToLog("The connection string does not contain any endpoint.");
+                        return;
+                    }
 
-                var host = serviceBusConnectionStringBuilder.Endpoints.ToArray()[0].Host;
+                    host = serviceBusConnectionStringBuilder.Endpoints.ToArray()[0].Host;
+                }
 
                 var index = host.IndexOf(".", StringComparison.Ordinal);
 

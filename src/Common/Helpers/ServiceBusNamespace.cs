@@ -29,6 +29,7 @@ using System.Text.RegularExpressions;
 using System.Globalization;
 using System.Linq;
 using System.Collections.Generic;
+using ServiceBusExplorer.Auth;
 using ServiceBusExplorer.Utilities.Helpers;
 
 #endregion
@@ -39,7 +40,8 @@ namespace ServiceBusExplorer.Helpers
     {
         Custom,
         Cloud,
-        OnPremises
+        OnPremises,
+        EntraId
     }
 
     /// <summary>
@@ -82,6 +84,11 @@ namespace ServiceBusExplorer.Helpers
         const string ConnectionStringWindowsPassword = "windowspassword";
         const string ConnectionStringTransportType = "transporttype";
         const string ConnectionStringEntityPath = "entitypath";
+        const string ConnectionStringAuthentication = "authentication";
+        const string ConnectionStringClientId = "clientid";
+        const string ConnectionStringTenantId = "tenantid";
+        const string ConnectionStringClientSecret = "clientsecret";
+        const string ConnectionStringCertificateThumbprint = "certificatethumbprint";
 
         #endregion
 
@@ -91,6 +98,7 @@ namespace ServiceBusExplorer.Helpers
         //***************************
         public const string SasConnectionStringFormat = "Endpoint={0};SharedAccessKeyName={1};SharedAccessKey={2};TransportType={3}";
         public const string SasConnectionStringEntityPathFormat = "Endpoint={0};SharedAccessKeyName={1};SharedAccessKey={2};TransportType={3};EntityPath={4}";
+        public const string EntraIdConnectionStringFormat = "Endpoint={0};Authentication={1};TransportType={2}";
         #endregion
 
         #region Public Constructors
@@ -110,6 +118,39 @@ namespace ServiceBusExplorer.Helpers
             WindowsDomain = default(string);
             WindowsUserName = default(string);
             WindowsPassword = default(string);
+            EntraIdAuthentication = new EntraIdAuthenticationOptions();
+        }
+
+        /// <summary>
+        /// Initializes a ServiceBusNamespace that authenticates via Microsoft Entra ID
+        /// (managed identity, DefaultAzureCredential, service principal, etc.).
+        /// </summary>
+        public ServiceBusNamespace(
+            string fullyQualifiedNamespace,
+            EntraIdAuthenticationOptions authentication,
+            TransportType transportType = TransportType.Amqp,
+            string entityPath = "",
+            bool isUserCreated = false)
+        {
+            if (string.IsNullOrWhiteSpace(fullyQualifiedNamespace))
+            {
+                throw new ArgumentException("Fully qualified namespace must be provided.", nameof(fullyQualifiedNamespace));
+            }
+
+            if (authentication == null || !authentication.IsEntraId)
+            {
+                throw new ArgumentException("An Entra ID authentication mode must be specified.", nameof(authentication));
+            }
+
+            ConnectionStringType = ServiceBusNamespaceType.EntraId;
+            EntraIdAuthentication = authentication;
+            FullyQualifiedNamespace = NormalizeFqdn(fullyQualifiedNamespace);
+            Namespace = FullyQualifiedNamespace.Split('.')[0];
+            Uri = $"sb://{FullyQualifiedNamespace}/";
+            TransportType = transportType;
+            EntityPath = entityPath ?? string.Empty;
+            UserCreated = isUserCreated;
+            ConnectionString = BuildEntraIdConnectionString(FullyQualifiedNamespace, authentication, transportType, EntityPath);
         }
 
         /// <summary>
@@ -239,6 +280,13 @@ namespace ServiceBusExplorer.Helpers
                 toLower.Contains(ConnectionStringSharedAccessKey))
             {
                 return GetServiceBusNamespaceUsingSAS(key, connectionString, staticWriteToLog, 
+                    isUserCreated, parameters);
+            }
+
+            if (toLower.Contains(ConnectionStringEndpoint) &&
+                toLower.Contains(ConnectionStringAuthentication))
+            {
+                return GetServiceBusNamespaceUsingEntraId(key, connectionString, staticWriteToLog,
                     isUserCreated, parameters);
             }
 
@@ -407,6 +455,19 @@ namespace ServiceBusExplorer.Helpers
         /// Gets or sets the EntityPath
         /// </summary>
         public string EntityPath { get; set; }
+
+        /// <summary>
+        /// Gets or sets the fully-qualified namespace (e.g. "mybus.servicebus.windows.net").
+        /// Used by Entra-ID-authenticated namespaces.
+        /// </summary>
+        public string FullyQualifiedNamespace { get; set; }
+
+        /// <summary>
+        /// Authentication options for Entra ID (managed identity, service principal, ...). 
+        /// When <see cref="ConnectionStringType"/> is <see cref="ServiceBusNamespaceType.EntraId"/>
+        /// this drives credential creation.
+        /// </summary>
+        public EntraIdAuthenticationOptions EntraIdAuthentication { get; set; }
         #endregion
 
         #region Private Methods
@@ -576,6 +637,209 @@ namespace ServiceBusExplorer.Helpers
             }
 
             return uri.Host.Split('.')[0];
+        }
+
+        static ServiceBusNamespace GetServiceBusNamespaceUsingEntraId(string key, string connectionString,
+            WriteToLogDelegate staticWriteToLog, bool isUserCreated, Dictionary<string, string> parameters)
+        {
+            var endpoint = parameters.ContainsKey(ConnectionStringEndpoint)
+                ? parameters[ConnectionStringEndpoint]
+                : null;
+
+            if (string.IsNullOrWhiteSpace(endpoint))
+            {
+                staticWriteToLog(string.Format(CultureInfo.CurrentCulture,
+                    ServiceBusNamespaceEndpointIsNullOrEmpty, key));
+                return null;
+            }
+
+            if (!endpoint.Contains("://"))
+            {
+                staticWriteToLog(string.Format(CultureInfo.CurrentCulture,
+                    ServiceBusNamespaceEndpointPrefixedWithSb, endpoint));
+                endpoint = "sb://" + endpoint;
+            }
+
+            Uri uri;
+            try
+            {
+                uri = new Uri(endpoint);
+            }
+            catch (Exception)
+            {
+                staticWriteToLog(string.Format(CultureInfo.CurrentCulture,
+                    ServiceBusNamespaceEndpointUriIsInvalid, key));
+                return null;
+            }
+
+            var fqdn = uri.Host;
+            var authValue = parameters.ContainsKey(ConnectionStringAuthentication)
+                ? parameters[ConnectionStringAuthentication]
+                : null;
+
+            var mode = ParseAuthenticationMode(authValue);
+            if (mode == AuthenticationMode.Sas)
+            {
+                staticWriteToLog(string.Format(CultureInfo.CurrentCulture,
+                    "Authentication value '{0}' for namespace {1} is not recognized.", authValue, key));
+                return null;
+            }
+
+            var options = new EntraIdAuthenticationOptions
+            {
+                Mode = mode,
+                ClientId = parameters.ContainsKey(ConnectionStringClientId) ? parameters[ConnectionStringClientId] : null,
+                TenantId = parameters.ContainsKey(ConnectionStringTenantId) ? parameters[ConnectionStringTenantId] : null,
+                ClientSecret = parameters.ContainsKey(ConnectionStringClientSecret) ? parameters[ConnectionStringClientSecret] : null,
+                CertificateThumbprint = parameters.ContainsKey(ConnectionStringCertificateThumbprint) ? parameters[ConnectionStringCertificateThumbprint] : null,
+            };
+
+            var settings = new MessagingFactorySettings();
+            var transportType = settings.TransportType;
+            if (parameters.ContainsKey(ConnectionStringTransportType))
+            {
+                Enum.TryParse(parameters[ConnectionStringTransportType], true, out transportType);
+            }
+
+            var entityPath = parameters.ContainsKey(ConnectionStringEntityPath)
+                ? parameters[ConnectionStringEntityPath]
+                : string.Empty;
+
+            return new ServiceBusNamespace(fqdn, options, transportType, entityPath, isUserCreated)
+            {
+                ConnectionString = connectionString,
+            };
+        }
+
+        public static AuthenticationMode ParseAuthenticationMode(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return AuthenticationMode.Sas;
+            }
+
+            var normalized = new string(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+
+            switch (normalized)
+            {
+                case "managedidentity":
+                case "msi":
+                case "managedidentitysystemassigned":
+                case "systemassignedmanagedidentity":
+                    return AuthenticationMode.ManagedIdentitySystemAssigned;
+                case "managedidentityuserassigned":
+                case "userassignedmanagedidentity":
+                    return AuthenticationMode.ManagedIdentityUserAssigned;
+                case "defaultazurecredential":
+                case "default":
+                case "developer":
+                    return AuthenticationMode.DefaultAzureCredential;
+                case "serviceprincipal":
+                case "serviceprincipalsecret":
+                case "clientsecret":
+                    return AuthenticationMode.ServicePrincipalSecret;
+                case "serviceprincipalcertificate":
+                case "clientcertificate":
+                case "certificate":
+                    return AuthenticationMode.ServicePrincipalCertificate;
+                case "interactivebrowser":
+                case "interactive":
+                case "browser":
+                    return AuthenticationMode.InteractiveBrowser;
+                default:
+                    return AuthenticationMode.Sas;
+            }
+        }
+
+        public static string FormatAuthenticationMode(AuthenticationMode mode)
+        {
+            switch (mode)
+            {
+                case AuthenticationMode.ManagedIdentitySystemAssigned:
+                    return "Managed Identity";
+                case AuthenticationMode.ManagedIdentityUserAssigned:
+                    return "Managed Identity (User Assigned)";
+                case AuthenticationMode.DefaultAzureCredential:
+                    return "DefaultAzureCredential";
+                case AuthenticationMode.ServicePrincipalSecret:
+                    return "Service Principal";
+                case AuthenticationMode.ServicePrincipalCertificate:
+                    return "Service Principal Certificate";
+                case AuthenticationMode.InteractiveBrowser:
+                    return "Interactive Browser";
+                default:
+                    return "SAS";
+            }
+        }
+
+        public static string BuildEntraIdConnectionString(string fullyQualifiedNamespace,
+            EntraIdAuthenticationOptions options, TransportType transportType, string entityPath = "")
+        {
+            if (options == null)
+            {
+                throw new ArgumentNullException(nameof(options));
+            }
+
+            var fqdn = NormalizeFqdn(fullyQualifiedNamespace);
+            var endpoint = $"sb://{fqdn}/";
+            var sb = new System.Text.StringBuilder();
+            sb.Append("Endpoint=").Append(endpoint).Append(";");
+            sb.Append("Authentication=").Append(FormatAuthenticationMode(options.Mode)).Append(";");
+
+            if (!string.IsNullOrWhiteSpace(options.ClientId))
+            {
+                sb.Append("ClientId=").Append(options.ClientId).Append(";");
+            }
+
+            if (!string.IsNullOrWhiteSpace(options.TenantId))
+            {
+                sb.Append("TenantId=").Append(options.TenantId).Append(";");
+            }
+
+            if (options.Mode == AuthenticationMode.ServicePrincipalSecret &&
+                !string.IsNullOrWhiteSpace(options.ClientSecret))
+            {
+                sb.Append("ClientSecret=").Append(options.ClientSecret).Append(";");
+            }
+
+            if (options.Mode == AuthenticationMode.ServicePrincipalCertificate &&
+                !string.IsNullOrWhiteSpace(options.CertificateThumbprint))
+            {
+                sb.Append("CertificateThumbprint=").Append(options.CertificateThumbprint).Append(";");
+            }
+
+            sb.Append("TransportType=").Append(transportType.ToString());
+
+            if (!string.IsNullOrWhiteSpace(entityPath))
+            {
+                sb.Append(";EntityPath=").Append(entityPath);
+            }
+
+            return sb.ToString();
+        }
+
+        static string NormalizeFqdn(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+
+            var trimmed = value.Trim();
+            if (trimmed.Contains("://"))
+            {
+                try
+                {
+                    var uri = new Uri(trimmed);
+                    return uri.Host;
+                }
+                catch
+                {
+                    // fall through
+                }
+            }
+
+            return trimmed.Trim('/');
         }
 
         #endregion
