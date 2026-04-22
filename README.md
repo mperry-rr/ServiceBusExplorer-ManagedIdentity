@@ -7,6 +7,7 @@ The Service Bus Explorer allows users to efficiently administer messaging entiti
 
 ## Features
 
+- **Microsoft Entra ID / Managed Identity authentication** — connect to AAD-protected Service Bus namespaces without shared-access keys. See [Connecting with Microsoft Entra ID](#connecting-with-microsoft-entra-id-managed-identity) below.
 - **Dashboard tab** — live overview of message counts (Active, Dead Letter, Scheduled, Total) for all queues and subscriptions, with auto-refresh and color-coded dead-letter alerts
 - **TreeView search/filter** — real-time filtering of queues, topics and subscriptions; press Ctrl+F to focus
 - **Copy message body** — one-click clipboard copy from the message preview pane
@@ -16,6 +17,106 @@ The Service Bus Explorer allows users to efficiently administer messaging entiti
 - Relay services, Notification Hubs and Event Hubs support
 
 ![Service Bus Explorer](./media/service-bus-explorer.png)
+
+# Download
+
+Pre-built binaries for this fork are in [`dist/`](./dist). The easiest way to run it:
+
+- Download [`dist/ServiceBusExplorer-ManagedIdentity.zip`](./dist/ServiceBusExplorer-ManagedIdentity.zip)
+- Extract anywhere and run `ServiceBusExplorer.exe`
+
+Alternatively copy the expanded folder [`dist/ServiceBusExplorer-ManagedIdentity/`](./dist/ServiceBusExplorer-ManagedIdentity) directly.
+
+# Connecting with Microsoft Entra ID (Managed Identity)
+
+This fork adds first-class support for Microsoft Entra ID / Managed Identity so you can connect to Service Bus namespaces that have SAS keys disabled (`disableLocalAuth: true`) or when you simply prefer identity-based auth.
+
+## Supported authentication modes
+
+| Mode | When to use |
+|---|---|
+| **DefaultAzureCredential** | Developer laptops. Uses your `az login` token, Visual Studio credentials, or environment variables — whichever is available. **Recommended for local development.** |
+| **Managed Identity (System Assigned)** | Only when the tool runs on Azure compute (VM, App Service, Container Apps, AKS, Functions) that has a system-assigned identity. Relies on IMDS, so it won't work on a dev laptop. |
+| **Managed Identity (User Assigned)** | Same as above but with a specific user-assigned managed identity; supply its Client ID. |
+| **Service Principal (client secret)** | App registration + secret. Supply Client ID, Tenant ID, Client Secret. |
+| **Service Principal (certificate)** | App registration + X.509 cert installed in `CurrentUser\My` or `LocalMachine\My`. Supply Client ID, Tenant ID, and the cert Thumbprint. |
+| **Interactive browser sign-in** | Pops a browser for MFA-protected sign-in. Useful when `az login` isn't available. |
+
+All modes use the AMQP transport — Service Bus + AAD requires AMQP; the transport combo is locked accordingly.
+
+## Required Azure RBAC
+
+Assign your identity one of the built-in Service Bus data roles on the namespace (or a specific queue/topic):
+
+| Role | What it grants |
+|---|---|
+| **Azure Service Bus Data Receiver** | Receive messages, peek, complete, abandon, dead-letter |
+| **Azure Service Bus Data Sender** | Send messages, schedule, cancel scheduled |
+| **Azure Service Bus Data Owner** | Full data-plane access plus entity management (create/update/delete queues, topics, subscriptions, rules) |
+
+For browsing **and** administering a namespace (creating queues etc.) you want Data Owner.
+
+## Using the UI
+
+1. Launch `ServiceBusExplorer.exe`.
+2. **File → Connect using Entra ID (Service Bus)**.
+3. In the dialog:
+   - Pick **Authentication mode** (defaults to DefaultAzureCredential).
+   - Fill in **Fully qualified namespace**, e.g. `mybus.servicebus.windows.net`.
+   - Supply Client ID / Tenant ID / Secret / Thumbprint only if the selected mode requires them — irrelevant fields are hidden.
+4. Click **OK**. The dialog builds an Entra-ID pseudo connection string and injects it into the main Connect form.
+5. Click **Save** to add it to your namespace list (give it a memorable key), then **OK** to connect.
+
+After saving, the connection appears in **File → Saved connections** just like any SAS connection.
+
+## Using the command line
+
+The executable accepts the same CLI flags as before, plus new Entra ID options:
+
+```powershell
+# DefaultAzureCredential (recommended for dev boxes)
+ServiceBusExplorer.exe --fqdn mybus.servicebus.windows.net --auth DefaultAzureCredential
+
+# Service principal (client secret)
+ServiceBusExplorer.exe --fqdn mybus.servicebus.windows.net `
+                       --auth ServicePrincipal `
+                       --client-id <appId> `
+                       --tenant-id <tenantId> `
+                       --client-secret <secret>
+
+# User-assigned managed identity (when running on Azure compute)
+ServiceBusExplorer.exe --fqdn mybus.servicebus.windows.net `
+                       --auth ManagedIdentityUserAssigned `
+                       --client-id <uamiClientId>
+
+# Interactive browser sign-in
+ServiceBusExplorer.exe --fqdn mybus.servicebus.windows.net --auth InteractiveBrowser
+```
+
+`--auth` aliases accepted: `ManagedIdentity`, `MSI`, `ManagedIdentityUserAssigned`, `DefaultAzureCredential`, `Default`, `ServicePrincipal`, `ClientSecret`, `ServicePrincipalCertificate`, `Certificate`, `InteractiveBrowser`, `Browser`.
+
+You can also pass a raw connection string directly:
+
+```
+ServiceBusExplorer.exe -c "Endpoint=sb://mybus.servicebus.windows.net/;Authentication=Managed Identity;TransportType=Amqp"
+```
+
+## Pseudo connection-string format
+
+Saved Entra-ID connections are stored in the same settings file as SAS connections using this format:
+
+```
+Endpoint=sb://<fqdn>/;Authentication=<Mode>;ClientId=<guid>;TenantId=<guid>;TransportType=Amqp
+```
+
+`ClientId` / `TenantId` / `ClientSecret` / `CertificateThumbprint` are only included when the selected mode needs them.
+
+## Troubleshooting
+
+- **"Managed Identity not available"** on a laptop → use **DefaultAzureCredential** instead; MI only works on Azure compute.
+- **"Unauthorized"** / 401 from Service Bus → you're authenticated but lack the Service Bus Data role. Ask an owner to assign `Azure Service Bus Data Receiver` (or Sender / Owner) on the namespace.
+- **Nothing happens / "Messaging factory created" then silence** — ensure `az login` has a fresh token for the correct tenant: `az login --tenant <tenantId>`.
+- **Notification Hubs are disabled** when connecting via Entra ID — the legacy Notification Hubs SDK does not support AAD. SAS connections still get Notification Hub support.
 
 # Software requirements
 The following software is required to run ServiceBusExplorer. It may run on other versions.
