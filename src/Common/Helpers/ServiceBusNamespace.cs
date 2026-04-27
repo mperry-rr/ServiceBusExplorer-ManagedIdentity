@@ -45,6 +45,19 @@ namespace ServiceBusExplorer.Helpers
     }
 
     /// <summary>
+    /// Identifies the authentication mechanism used to connect to a Service Bus namespace.
+    /// </summary>
+    public enum ServiceBusAuthMode
+    {
+        /// <summary>Shared Access Signature (connection-string based)</summary>
+        Sas,
+        /// <summary>On-premises Windows credentials</summary>
+        Windows,
+        /// <summary>Azure Active Directory / Microsoft Entra ID interactive browser sign-in</summary>
+        AzureActiveDirectory
+    }
+
+    /// <summary>
     /// This class represents a service bus namespace address and authentication credentials
     /// </summary>
     public class ServiceBusNamespace
@@ -108,6 +121,7 @@ namespace ServiceBusExplorer.Helpers
         public ServiceBusNamespace()
         {
             ConnectionStringType = ServiceBusNamespaceType.Cloud;
+            AuthMode = ServiceBusAuthMode.Sas;
             ConnectionString = default(string);
             Uri = default(string);
             Namespace = default(string);
@@ -181,6 +195,7 @@ namespace ServiceBusExplorer.Helpers
                                    bool isUserCreated = false)
         {
             ConnectionStringType = connectionStringType;
+            AuthMode = ServiceBusAuthMode.Sas;
             Uri = string.IsNullOrWhiteSpace(uri) ?
                   ServiceBusEnvironment.CreateServiceUri("sb", ns, servicePath).ToString() :
                   uri;
@@ -235,6 +250,7 @@ namespace ServiceBusExplorer.Helpers
                                    bool isUserCreated = false)
         {
             ConnectionStringType = ServiceBusNamespaceType.OnPremises;
+            AuthMode = ServiceBusAuthMode.Windows;
             ConnectionString = connectionString;
             Uri = endpoint;
             var uri = new Uri(endpoint);
@@ -256,6 +272,37 @@ namespace ServiceBusExplorer.Helpers
             WindowsPassword = windowsPassword;
             TransportType = transportType;
             UserCreated = isUserCreated;
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the ServiceBusNamespace class for Azure Active Directory authentication.
+        /// </summary>
+        public ServiceBusNamespace(string endpoint,
+                                   string ns,
+                                   string tenantId,
+                                   TransportType transportType,
+                                   string entityPath = "",
+                                   bool isUserCreated = false)
+        {
+            ConnectionStringType = ServiceBusNamespaceType.Cloud;
+            AuthMode = ServiceBusAuthMode.AzureActiveDirectory;
+            Uri = endpoint;
+            Namespace = ns;
+            TenantId = tenantId;
+            TransportType = transportType;
+            EntityPath = entityPath;
+            UserCreated = isUserCreated;
+
+            // No SAS keys or connection string for AAD
+            ConnectionString = null;
+            SharedAccessKeyName = null;
+            SharedAccessKey = null;
+            StsEndpoint = null;
+            RuntimePort = null;
+            ManagementPort = null;
+            WindowsDomain = null;
+            WindowsUserName = null;
+            WindowsPassword = null;
         }
         #endregion
 
@@ -385,6 +432,8 @@ namespace ServiceBusExplorer.Helpers
         {
             get
             {
+                if (ConnectionString == null)
+                    return null;
                 var regex = new Regex(@";TransportType=\w*;?");
                 var connectionString = regex.Replace(ConnectionString, string.Empty);
                 return connectionString;
@@ -629,7 +678,7 @@ namespace ServiceBusExplorer.Helpers
             {
                 uri = new Uri(endpoint);
             }
-            catch (Exception)
+            catch (UriFormatException)
             {
                 staticWriteToLog(string.Format(CultureInfo.CurrentCulture, 
                     ServiceBusNamespaceEndpointUriIsInvalid, key));

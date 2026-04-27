@@ -66,6 +66,10 @@ namespace ServiceBusExplorer.ServiceBus.Helpers
             this.writeToLog = writeToLog;
         }
 
+        /// <summary>
+        /// Returns true when the connection string contains an EntityPath segment.
+        /// Always returns false for AAD connections.
+        /// </summary>
         public bool ConnectionStringContainsEntityPath()
         {
             if (UsesEntraId || string.IsNullOrWhiteSpace(ConnectionString))
@@ -108,6 +112,17 @@ namespace ServiceBusExplorer.ServiceBus.Helpers
             }
 
             return new ServiceBusAdministrationClient(ConnectionString);
+        }
+
+        /// <summary>
+        /// Creates a <see cref="ServiceBusAdministrationClient"/> using AAD credentials or
+        /// a connection string depending on the current authentication mode.
+        /// </summary>
+        public ServiceBusAdministrationClient CreateAdministrationClient()
+        {
+            return IsAad
+                ? new ServiceBusAdministrationClient(FullyQualifiedNamespace, AadTokenCredential)
+                : new ServiceBusAdministrationClient(ConnectionString);
         }
 
         public async Task<bool> IsPremiumNamespace()
