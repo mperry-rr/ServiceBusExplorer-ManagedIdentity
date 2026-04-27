@@ -150,7 +150,6 @@ namespace ServiceBusExplorer
         private string currentSharedAccessKeyName;
         private string currentSharedAccessKey;
         private ServiceBusNamespace serviceBusNamespaceInstance;
-        private Microsoft.ServiceBus.TokenProvider aadTokenProvider;
         private IServiceBusQueue serviceBusQueue;
         private IServiceBusTopic serviceBusTopic;
         private IServiceBusSubscription serviceBusSubscription;
@@ -188,8 +187,6 @@ namespace ServiceBusExplorer
             this.writeToLog = writeToLog;
             MessageDeferProviderType = serviceBusHelper.MessageDeferProviderType;
             connectionString = serviceBusHelper.ConnectionString;
-            serviceBusNamespaceInstance = serviceBusHelper.serviceBusNamespaceInstance;
-            aadTokenProvider = serviceBusHelper.aadTokenProvider;
             namespaceManager = serviceBusHelper.NamespaceManager;
             notificationHubNamespaceManager = serviceBusHelper.NotificationHubNamespaceManager;
             MessagingFactory = serviceBusHelper.MessagingFactory;
@@ -232,24 +229,10 @@ namespace ServiceBusExplorer
                        connectionStringType == ServiceBusNamespaceType.EntraId ||
                       (namespaceUri != null &&
                        !string.IsNullOrWhiteSpace(uri = namespaceUri.ToString()) &&
-                        (uri.Contains(CloudServiceBusPostfix) ||
-                         uri.Contains(TestServiceBusPostFix) ||
-                         uri.Contains(GermanyServiceBusPostfix) ||
-                         uri.Contains(ChinaServiceBusPostfix)));
-            }
-        }
-
-        /// <summary>
-        /// Gets a boolean that indicates if the current namespace uses Azure Active Directory authentication.
-        /// </summary>
-        public bool IsAzureActiveDirectory
-        {
-            get
-            {
-                lock (this)
-                {
-                    return serviceBusNamespaceInstance?.IsAzureActiveDirectory == true;
-                }
+                       (uri.Contains(CloudServiceBusPostfix) ||
+                        uri.Contains(TestServiceBusPostFix) ||
+                        uri.Contains(GermanyServiceBusPostfix) ||
+                        uri.Contains(ChinaServiceBusPostfix)));
             }
         }
 
@@ -416,11 +399,6 @@ namespace ServiceBusExplorer
         {
             get
             {
-                if (string.IsNullOrEmpty(connectionString))
-                {
-                    return null;
-                }
-
                 var builder = new ServiceBusConnectionStringBuilder(connectionString)
                 {
                     EntityPath = string.Empty
@@ -663,28 +641,6 @@ namespace ServiceBusExplorer
             return factory;
         }
 
-        public EventHubClient CreateEventHubClient(string path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                throw new ArgumentException("The path argument must not be null or whitespace.", nameof(path));
-            }
-
-            if (serviceBusNamespaceInstance?.IsAzureActiveDirectory == true)
-            {
-                var endpointUri = namespaceUri ?? new Uri(serviceBusNamespaceInstance.Uri);
-                return EventHubClient.CreateWithAzureActiveDirectory(
-                    endpointUri,
-                    path,
-                    AadCredentialFactory.CreateOldSdkAuthenticationCallback(serviceBusNamespaceInstance.TenantId),
-                    AadCredentialFactory.GetAuthority(serviceBusNamespaceInstance.TenantId),
-                    null,
-                    true);
-            }
-
-            return EventHubClient.CreateFromConnectionString(GetAmqpConnectionString(ConnectionString), path);
-        }
-
         /// <summary>
         /// Connects the ServiceBusHelper object to service bus namespace contained in the ServiceBusNamespaces dictionary.
         /// </summary>
@@ -708,8 +664,7 @@ namespace ServiceBusExplorer
 
             if (!TestNamespaceHostIsContactable(serviceBusNamespace))
             {
-                var endpoint = isAad ? serviceBusNamespace.Uri : serviceBusNamespace.ConnectionString;
-                throw new Exception($"Could not contact host in connection string: { endpoint }.");
+                throw new Exception($"Could not contact host in connection string: { serviceBusNamespace.ConnectionString }.");
             }
 
             var func = (() =>
@@ -743,8 +698,7 @@ namespace ServiceBusExplorer
                                                                                             RetryHelper.RetryCount);
                 }
 
-                // Notification Hubs don't support AAD token-provider auth
-                if (!isAad)
+                try
                 {
                     if (isEntraId)
                     {
@@ -767,6 +721,10 @@ namespace ServiceBusExplorer
                                                                                                                             RetryHelper.RetryCount);
                         }
                     }
+                }
+                catch (Exception)
+                {
+                    // ignored
                 }
 
                 serviceBusQueue = CreateServiceBusEntity(static (sbn, nsmgr) => new ServiceBusQueue(sbn, nsmgr));
@@ -4444,21 +4402,6 @@ namespace ServiceBusExplorer
             }
 
             return true;
-        }
-
-        private static string GetAmqpConnectionString(string currentConnectionString)
-        {
-            if (string.IsNullOrEmpty(currentConnectionString))
-            {
-                throw new ArgumentException(ServiceBusConnectionStringCannotBeNull);
-            }
-
-            var builder = new ServiceBusConnectionStringBuilder(currentConnectionString)
-            {
-                TransportType = TransportType.Amqp
-            };
-
-            return builder.ToString();
         }
 
         #endregion

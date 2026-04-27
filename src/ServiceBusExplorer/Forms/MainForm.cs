@@ -558,9 +558,8 @@ namespace ServiceBusExplorer.Forms
                     SelectedEntities = connectForm.SelectedEntities;
                     ServiceBusHelper.ConnectivityMode = connectForm.ConnectivityMode;
                     ServiceBusHelper.UseAmqpWebSockets = connectForm.UseAmqpWebSockets;
-                    var serviceBusNamespace = connectForm.ServiceBusNamespaceInstance
-                        ?? ServiceBusNamespace.GetServiceBusNamespace(connectForm.Key ?? "Manual",
-                            connectForm.ConnectionString, StaticWriteToLog);
+                    var serviceBusNamespace = ServiceBusNamespace.GetServiceBusNamespace(connectForm.Key ?? "Manual",
+                        connectForm.ConnectionString, StaticWriteToLog);
                     serviceBusHelper.Connect(serviceBusNamespace);
 
                     SetTitle(serviceBusNamespace.Namespace, "Service Bus");
@@ -4623,23 +4622,17 @@ namespace ServiceBusExplorer.Forms
                     var eventHubListNode = FindNode(Constants.EventHubEntities, rootNode);
                     var notificationHubListNode = FindNode(Constants.NotificationHubEntities, rootNode);
                     var relayServiceListNode = FindNode(Constants.RelayEntities, rootNode);
-                    var isAad = serviceBusHelper.IsAzureActiveDirectory;
-                    var loadQueues = SelectedEntities.Contains(Constants.QueueEntities);
-                    var loadTopics = SelectedEntities.Contains(Constants.TopicEntities);
-                    var loadEventHubs = !isAad && SelectedEntities.Contains(Constants.EventHubEntities);
-                    var loadNotificationHubs = !isAad && SelectedEntities.Contains(Constants.NotificationHubEntities);
-                    var loadRelays = !isAad && SelectedEntities.Contains(Constants.RelayEntities);
                     if (entityType == EntityType.All)
                     {
                         serviceBusTreeView.Nodes.Clear();
                         rootNode = serviceBusTreeView.Nodes.Add(serviceBusHelper.NamespaceUri.AbsoluteUri, serviceBusHelper.NamespaceUri.AbsoluteUri, AzureIconIndex, AzureIconIndex);
                         rootNode.ContextMenuStrip = rootContextMenuStrip;
-                        if (loadQueues)
+                        if (SelectedEntities.Contains(Constants.QueueEntities))
                         {
                             queueListNode = rootNode.Nodes.Add(Constants.QueueEntities, Constants.QueueEntities, QueueListIconIndex, QueueListIconIndex);
                             queueListNode.ContextMenuStrip = queuesContextMenuStrip;
                         }
-                        if (loadTopics)
+                        if (SelectedEntities.Contains(Constants.TopicEntities))
                         {
                             topicListNode = rootNode.Nodes.Add(Constants.TopicEntities, Constants.TopicEntities, TopicListIconIndex, TopicListIconIndex);
                             topicListNode.ContextMenuStrip = topicsContextMenuStrip;
@@ -4648,17 +4641,17 @@ namespace ServiceBusExplorer.Forms
                         // NOTE: Relays are not actually supported by Service Bus for Windows Server
                         if (serviceBusHelper.IsCloudNamespace)
                         {
-                            if (loadEventHubs)
+                            if (SelectedEntities.Contains(Constants.EventHubEntities))
                             {
                                 eventHubListNode = rootNode.Nodes.Add(Constants.EventHubEntities, Constants.EventHubEntities, EventHubListIconIndex, EventHubListIconIndex);
                                 eventHubListNode.ContextMenuStrip = eventHubsContextMenuStrip;
                             }
-                            if (loadNotificationHubs)
+                            if (SelectedEntities.Contains(Constants.NotificationHubEntities))
                             {
                                 notificationHubListNode = rootNode.Nodes.Add(Constants.NotificationHubEntities, Constants.NotificationHubEntities, NotificationHubListIconIndex, NotificationHubListIconIndex);
                                 notificationHubListNode.ContextMenuStrip = notificationHubsContextMenuStrip;
                             }
-                            if (loadRelays)
+                            if (SelectedEntities.Contains(Constants.RelayEntities))
                             {
                                 relayServiceListNode = rootNode.Nodes.Add(Constants.RelayEntities, Constants.RelayEntities, RelayListIconIndex, RelayListIconIndex);
                                 relayServiceListNode.ContextMenuStrip = relayServicesContextMenuStrip;
@@ -4668,7 +4661,7 @@ namespace ServiceBusExplorer.Forms
                     updating = true;
                     if (serviceBusHelper.IsCloudNamespace)
                     {
-                        if (loadEventHubs &&
+                        if (SelectedEntities.Contains(Constants.EventHubEntities) &&
                             (entityType == EntityType.All ||
                             entityType == EntityType.EventHub))
                         {
@@ -4707,7 +4700,7 @@ namespace ServiceBusExplorer.Forms
                                 serviceBusTreeView.Nodes.Remove(eventHubListNode);
                             }
                         }
-                        if (loadNotificationHubs &&
+                        if (SelectedEntities.Contains(Constants.NotificationHubEntities) &&
                             (entityType == EntityType.All ||
                             entityType == EntityType.NotificationHub))
                         {
@@ -4755,7 +4748,7 @@ namespace ServiceBusExplorer.Forms
                                 serviceBusTreeView.Nodes.Remove(notificationHubListNode);
                             }
                         }
-                        if (loadRelays &&
+                        if (SelectedEntities.Contains(Constants.RelayEntities) &&
                             (entityType == EntityType.All ||
                             entityType == EntityType.Relay))
                         {
@@ -4796,7 +4789,7 @@ namespace ServiceBusExplorer.Forms
                         }
                     }
 
-                    if (loadQueues &&
+                    if (SelectedEntities.Contains(Constants.QueueEntities) &&
                         (entityType == EntityType.All ||
                          entityType == EntityType.Queue))
                     {
@@ -4837,7 +4830,7 @@ namespace ServiceBusExplorer.Forms
                             serviceBusTreeView.Nodes.Remove(queueListNode);
                         }
                     }
-                    if (loadTopics &&
+                    if (SelectedEntities.Contains(Constants.TopicEntities) &&
                         (entityType == EntityType.All ||
                          entityType == EntityType.Topic))
                     {
@@ -7404,8 +7397,9 @@ namespace ServiceBusExplorer.Forms
                     var ns = item.Value;
                     if (ns != null)
                     {
-                        serviceBusHelper.Connect(ns);
-                        SetTitle(ns.Namespace, "Service Bus");
+                        var serviceBusNamespace = ServiceBusNamespace.GetServiceBusNamespace(item.Key, ns.ConnectionString, StaticWriteToLog);
+                        serviceBusHelper.Connect(serviceBusNamespace);
+                        SetTitle(serviceBusNamespace.Namespace, "Service Bus");
                     }
                 }
                 if (string.Compare(argumentName, "/c", StringComparison.InvariantCultureIgnoreCase) == 0 ||

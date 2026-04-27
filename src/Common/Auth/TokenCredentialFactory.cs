@@ -23,7 +23,7 @@ namespace ServiceBusExplorer.Auth
             switch (options.Mode)
             {
                 case AuthenticationMode.ManagedIdentitySystemAssigned:
-                    return new ManagedIdentityCredential();
+                    return new ManagedIdentityCredential(ManagedIdentityId.SystemAssigned);
 
                 case AuthenticationMode.ManagedIdentityUserAssigned:
                     if (string.IsNullOrWhiteSpace(options.ClientId))
@@ -32,7 +32,7 @@ namespace ServiceBusExplorer.Auth
                             "ClientId is required for user-assigned managed identity.",
                             nameof(options));
                     }
-                    return new ManagedIdentityCredential(options.ClientId);
+                    return new ManagedIdentityCredential(ManagedIdentityId.FromUserAssignedClientId(options.ClientId));
 
                 case AuthenticationMode.DefaultAzureCredential:
                     var dacOptions = new DefaultAzureCredentialOptions();

@@ -114,17 +114,6 @@ namespace ServiceBusExplorer.ServiceBus.Helpers
             return new ServiceBusAdministrationClient(ConnectionString);
         }
 
-        /// <summary>
-        /// Creates a <see cref="ServiceBusAdministrationClient"/> using AAD credentials or
-        /// a connection string depending on the current authentication mode.
-        /// </summary>
-        public ServiceBusAdministrationClient CreateAdministrationClient()
-        {
-            return IsAad
-                ? new ServiceBusAdministrationClient(FullyQualifiedNamespace, AadTokenCredential)
-                : new ServiceBusAdministrationClient(ConnectionString);
-        }
-
         public async Task<bool> IsPremiumNamespace()
         {
             var administrationClient = CreateAdministrationClient();
