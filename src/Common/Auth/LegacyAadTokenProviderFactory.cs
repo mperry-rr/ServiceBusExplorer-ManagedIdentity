@@ -21,10 +21,22 @@ namespace ServiceBusExplorer.Auth
     {
         // Service Bus is a single AAD resource regardless of the namespace endpoint.
         // See https://learn.microsoft.com/azure/service-bus-messaging/service-bus-managed-service-identity
-        private const string ServiceBusAadResource = "https://servicebus.azure.net/";
+        public const string ServiceBusAadResource = "https://servicebus.azure.net/";
+        public const string EventHubsAadResource = "https://eventhubs.azure.net/";
         private const string ServiceBusAadScope = "https://servicebus.azure.net/.default";
+        private const string EventHubsAadScope = "https://eventhubs.azure.net/.default";
 
         public static TokenProvider Create(EntraIdAuthenticationOptions options)
+        {
+            return Create(options, ServiceBusAadResource);
+        }
+
+        /// <summary>
+        /// Creates a TokenProvider targeting the specified AAD resource (audience).
+        /// Use <see cref="ServiceBusAadResource"/> for Service Bus namespaces and
+        /// <see cref="EventHubsAadResource"/> for Event Hub namespaces.
+        /// </summary>
+        public static TokenProvider Create(EntraIdAuthenticationOptions options, string audience)
         {
             if (options == null)
             {
@@ -37,30 +49,39 @@ namespace ServiceBusExplorer.Auth
                     "LegacyAadTokenProviderFactory only supports Entra ID authentication modes.");
             }
 
+            var resource = string.IsNullOrWhiteSpace(audience) ? ServiceBusAadResource : audience;
+            var scope = ResourceToScope(resource);
+
             // Prefer the SDK's first-class MSI provider for system-assigned MI when possible.
             // It uses the IMDS endpoint without taking a dependency on Azure.Identity at runtime.
             if (options.Mode == AuthenticationMode.ManagedIdentitySystemAssigned &&
                 string.IsNullOrWhiteSpace(options.ClientId))
             {
-                return TokenProvider.CreateManagedIdentityTokenProvider(new Uri(ServiceBusAadResource));
+                return TokenProvider.CreateManagedIdentityTokenProvider(new Uri(resource));
             }
 
             var credential = TokenCredentialFactory.Create(options);
-            var audienceUri = new Uri(ServiceBusAadResource);
+            var audienceUri = new Uri(resource);
 
             // The legacy SDK passes us the namespace URI as "audience"; we ignore it because
-            // the AAD resource for the Service Bus data plane is fixed.
+            // the AAD resource for the data plane is determined by the caller's audience selection.
             return TokenProvider.CreateAzureActiveDirectoryTokenProvider(
-                async (audience, authority, state) =>
+                async (audienceArg, authority, state) =>
                 {
                     var token = await credential
-                        .GetTokenAsync(new TokenRequestContext(new[] { ServiceBusAadScope }), CancellationToken.None)
+                        .GetTokenAsync(new TokenRequestContext(new[] { scope }), CancellationToken.None)
                         .ConfigureAwait(false);
                     return token.Token;
                 },
                 audienceUri,
                 "https://login.microsoftonline.com/" + (options.TenantId ?? "common"),
                 null);
+        }
+
+        private static string ResourceToScope(string resource)
+        {
+            var trimmed = resource.TrimEnd('/');
+            return trimmed + "/.default";
         }
 
         /// <summary>

@@ -4622,17 +4622,23 @@ namespace ServiceBusExplorer.Forms
                     var eventHubListNode = FindNode(Constants.EventHubEntities, rootNode);
                     var notificationHubListNode = FindNode(Constants.NotificationHubEntities, rootNode);
                     var relayServiceListNode = FindNode(Constants.RelayEntities, rootNode);
+                    var isAad = serviceBusHelper.IsAzureActiveDirectory;
+                    var loadQueues = !serviceBusHelper.IsEventHubNamespace && SelectedEntities.Contains(Constants.QueueEntities);
+                    var loadTopics = !serviceBusHelper.IsEventHubNamespace && SelectedEntities.Contains(Constants.TopicEntities);
+                    var loadEventHubs = SelectedEntities.Contains(Constants.EventHubEntities) && (!isAad || serviceBusHelper.IsEventHubNamespace);
+                    var loadNotificationHubs = !isAad && SelectedEntities.Contains(Constants.NotificationHubEntities);
+                    var loadRelays = !isAad && SelectedEntities.Contains(Constants.RelayEntities);
                     if (entityType == EntityType.All)
                     {
                         serviceBusTreeView.Nodes.Clear();
                         rootNode = serviceBusTreeView.Nodes.Add(serviceBusHelper.NamespaceUri.AbsoluteUri, serviceBusHelper.NamespaceUri.AbsoluteUri, AzureIconIndex, AzureIconIndex);
                         rootNode.ContextMenuStrip = rootContextMenuStrip;
-                        if (SelectedEntities.Contains(Constants.QueueEntities))
+                        if (loadQueues)
                         {
                             queueListNode = rootNode.Nodes.Add(Constants.QueueEntities, Constants.QueueEntities, QueueListIconIndex, QueueListIconIndex);
                             queueListNode.ContextMenuStrip = queuesContextMenuStrip;
                         }
-                        if (SelectedEntities.Contains(Constants.TopicEntities))
+                        if (loadTopics)
                         {
                             topicListNode = rootNode.Nodes.Add(Constants.TopicEntities, Constants.TopicEntities, TopicListIconIndex, TopicListIconIndex);
                             topicListNode.ContextMenuStrip = topicsContextMenuStrip;
@@ -4641,17 +4647,17 @@ namespace ServiceBusExplorer.Forms
                         // NOTE: Relays are not actually supported by Service Bus for Windows Server
                         if (serviceBusHelper.IsCloudNamespace)
                         {
-                            if (SelectedEntities.Contains(Constants.EventHubEntities))
+                            if (loadEventHubs)
                             {
                                 eventHubListNode = rootNode.Nodes.Add(Constants.EventHubEntities, Constants.EventHubEntities, EventHubListIconIndex, EventHubListIconIndex);
                                 eventHubListNode.ContextMenuStrip = eventHubsContextMenuStrip;
                             }
-                            if (SelectedEntities.Contains(Constants.NotificationHubEntities))
+                            if (loadNotificationHubs)
                             {
                                 notificationHubListNode = rootNode.Nodes.Add(Constants.NotificationHubEntities, Constants.NotificationHubEntities, NotificationHubListIconIndex, NotificationHubListIconIndex);
                                 notificationHubListNode.ContextMenuStrip = notificationHubsContextMenuStrip;
                             }
-                            if (SelectedEntities.Contains(Constants.RelayEntities))
+                            if (loadRelays)
                             {
                                 relayServiceListNode = rootNode.Nodes.Add(Constants.RelayEntities, Constants.RelayEntities, RelayListIconIndex, RelayListIconIndex);
                                 relayServiceListNode.ContextMenuStrip = relayServicesContextMenuStrip;
@@ -4661,7 +4667,7 @@ namespace ServiceBusExplorer.Forms
                     updating = true;
                     if (serviceBusHelper.IsCloudNamespace)
                     {
-                        if (SelectedEntities.Contains(Constants.EventHubEntities) &&
+                        if (loadEventHubs &&
                             (entityType == EntityType.All ||
                             entityType == EntityType.EventHub))
                         {
@@ -4700,7 +4706,7 @@ namespace ServiceBusExplorer.Forms
                                 serviceBusTreeView.Nodes.Remove(eventHubListNode);
                             }
                         }
-                        if (SelectedEntities.Contains(Constants.NotificationHubEntities) &&
+                        if (loadNotificationHubs &&
                             (entityType == EntityType.All ||
                             entityType == EntityType.NotificationHub))
                         {
@@ -4748,7 +4754,7 @@ namespace ServiceBusExplorer.Forms
                                 serviceBusTreeView.Nodes.Remove(notificationHubListNode);
                             }
                         }
-                        if (SelectedEntities.Contains(Constants.RelayEntities) &&
+                        if (loadRelays &&
                             (entityType == EntityType.All ||
                             entityType == EntityType.Relay))
                         {
@@ -4789,7 +4795,7 @@ namespace ServiceBusExplorer.Forms
                         }
                     }
 
-                    if (SelectedEntities.Contains(Constants.QueueEntities) &&
+                    if (loadQueues &&
                         (entityType == EntityType.All ||
                          entityType == EntityType.Queue))
                     {
@@ -4830,7 +4836,7 @@ namespace ServiceBusExplorer.Forms
                             serviceBusTreeView.Nodes.Remove(queueListNode);
                         }
                     }
-                    if (SelectedEntities.Contains(Constants.TopicEntities) &&
+                    if (loadTopics &&
                         (entityType == EntityType.All ||
                          entityType == EntityType.Topic))
                     {
